@@ -1,0 +1,2 @@
+TRUE_STRING = 'True'
+FALSE_STRING = 'False'
