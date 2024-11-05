@@ -1,4 +1,4 @@
-from transformers import LlamaForCausalLM, LlamaTokenizerFast
+from transformers import PreTrainedModel, PreTrainedTokenizerFast
 from typing import List, Union, Optional
 import torch.nn.functional as F
 from llm_zsc.utils import string_to_variations_list
@@ -11,7 +11,7 @@ false_variations = string_to_variations_list(FALSE_STRING)
 
 class CausalLMZeroShotClassificationPipeline:
 
-    def __init__(self, model: LlamaForCausalLM, tokenizer: LlamaTokenizerFast, type_of_sequence: str = 'comment',
+    def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerFast, type_of_sequence: str = 'comment',
                  type_of_class='theme', override_system_prompt=None, override_context_messages=None,
                  use_system_prompt=True, llm_response_preamble=None):
         self.model = model
