@@ -13,8 +13,9 @@ class CausalLMZeroShotClassificationPipeline:
 
     def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerFast, type_of_sequence: str = 'comment',
                  type_of_class='theme', override_system_prompt=None, override_context_messages=None,
-                 use_system_prompt=True, llm_response_preamble=None):
+                 use_system_prompt=True, llm_response_preamble=None, verbose=False):
         self.model = model
+        self.verbose = verbose
 
         # update generation config so we are not doing sampling.
         self.model.generation_config.do_sample = None
@@ -31,7 +32,7 @@ class CausalLMZeroShotClassificationPipeline:
             self.model.generation_config.token_healing = True  # ensure we heal the last token.
 
         if override_system_prompt is None:
-            self.system_prompt = f"Your role is to classify whether a given text string belongs to a specific '{type_of_class}'. Simply respond with either 'True' or 'False' (without quotes). You should only return 'True' if it specifically mentions that {type_of_class}."
+            self.system_prompt = f"Your role is to classify whether a given text string belongs to a specific '{type_of_class}'. Simply respond with either 'True' or 'False' (without quotes). You should only return 'True' if it relates to that {type_of_class} (though different wording may be used)."
         else:
             self.system_prompt = override_system_prompt
 
@@ -56,15 +57,24 @@ class CausalLMZeroShotClassificationPipeline:
             *self.example_messages
         ]
 
-        self.all_true_ids = [self.tokenizer.encode(t, add_special_tokens=False)[0] for t in true_variations]
-        self.all_false_ids = [self.tokenizer.encode(f, add_special_tokens=False)[0] for f in false_variations]
+        self.all_true_ids = self.get_tokens_list(true_variations)
+        self.all_false_ids = self.get_tokens_list(false_variations)
 
         self.unique_true_ids = list(set(self.all_true_ids) - set(self.all_false_ids))
         self.unique_false_ids = list(set(self.all_false_ids) - set(self.all_true_ids))
         self.all_true_or_false_ids = list(set(self.unique_true_ids + self.unique_false_ids))
 
-    def classify_zero_shot(self, string_to_classify: str,
-                           classes_list: List[str], multi_label=False):
+    def get_tokens_list(self, strings_list):
+        tokens_list = []
+        for string_to_tokenize in strings_list:
+            encoded = self.tokenizer.encode(string_to_tokenize, add_special_tokens=False)
+            if len(encoded) > 1:
+                raise RuntimeError(f'Tried to encode string `{string_to_tokenize}` but more than one token was produced: {encoded}')
+            tokens_list.append(encoded[0])
+
+        return tokens_list
+
+    def classify_zero_shot(self, string_to_classify: str, classes_list: List[str], multi_label=False):
 
         scores = []
         for class_value in classes_list:
@@ -94,11 +104,14 @@ class CausalLMZeroShotClassificationPipeline:
             true_probs = true_false_probs[[self.all_true_or_false_ids.index(id) for id in self.unique_true_ids]]
             false_probs = true_false_probs[[self.all_true_or_false_ids.index(id) for id in self.unique_false_ids]]
 
-            true_prob = true_probs.sum().item()
-            false_prob = false_probs.sum().item()
+            true_prob_raw = true_probs.sum().item()
+            false_prob_raw = false_probs.sum().item()
 
-            total_prob = true_prob + false_prob
-            true_prob = true_prob / total_prob
+            total_prob = true_prob_raw + false_prob_raw
+            true_prob = true_prob_raw / total_prob
+
+            if self.verbose:
+                print(f"{string_to_classify=}\n{class_value=}\n{true_prob_raw=}\n{false_prob_raw=}\n{true_prob=}")
 
             max_logit_id = torch.argmax(logits).item()
             if max_logit_id not in self.all_true_or_false_ids:
