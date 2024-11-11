@@ -13,9 +13,10 @@ class CausalLMZeroShotClassificationPipeline:
 
     def __init__(self, model: PreTrainedModel, tokenizer: PreTrainedTokenizerFast, type_of_sequence: str = 'comment',
                  type_of_class='theme', override_system_prompt=None, override_context_messages=None,
-                 use_system_prompt=True, llm_response_preamble=None, verbose=False):
+                 use_system_prompt=True, llm_response_preamble=None, verbose=False, valid_token_min_threshold=0.9):
         self.model = model
         self.verbose = verbose
+        self.valid_token_min_threshold = valid_token_min_threshold
 
         # update generation config so we are not doing sampling.
         self.model.generation_config.do_sample = None
@@ -119,6 +120,24 @@ class CausalLMZeroShotClassificationPipeline:
                 raise ValueError(
                     f"The most likely next token is neither True nor False. It was `{most_likely_next_token}`. "
                     f"Check prompt and quality of model.")
+
+            # Separate check for total probability
+            if total_prob < self.valid_token_min_threshold:
+                # Get the next most likely token (excluding True and False)
+                sorted_logits, sorted_indices = torch.sort(logits[0], descending=True)
+                next_most_likely_token = None
+                for idx in sorted_indices:
+                    if idx.item() not in self.all_true_or_false_ids:
+                        next_most_likely_token = self.tokenizer.decode(idx.item())
+                        break
+
+                error_message = (
+                    f"Total probability of True and False is less than valid_token_min_threshold ({self.valid_token_min_threshold}). "
+                    f"Total probability of True and False tokens : {total_prob:.2f}. "
+                    f"Next most likely token (excluding True/False): '{next_most_likely_token}'. "
+                    f"Check prompt and quality of model."
+                )
+                raise ValueError(error_message)
 
             scores.append(true_prob)
 
